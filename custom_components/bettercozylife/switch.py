@@ -9,6 +9,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta
 import asyncio
 import async_timeout
+import re
 from .const import DOMAIN, DEVICE_TYPE_SWITCH, CONF_DEVICE_TYPE
 from .cozylife_device import CozyLifeDevice
 import logging
@@ -22,11 +23,11 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the BetterCozyLife Switch."""
+    """Set up the cozylife_plug Switch."""
     config = config_entry.data
     
     if config[CONF_DEVICE_TYPE] == DEVICE_TYPE_SWITCH:
-        switch = BetterCozyLifeSwitch(config, config_entry.entry_id)
+        switch = cozylife_plugSwitch(config, config_entry.entry_id)
         async_add_entities([switch])
         
         # Set up regular state refresh
@@ -46,22 +47,39 @@ async def async_setup_entry(
         # Schedule regular updates
         async_track_time_interval(hass, refresh_state, SCAN_INTERVAL)
 
-class BetterCozyLifeSwitch(SwitchEntity):
-    """Representation of a BetterCozyLife Switch."""
+class cozylife_plugSwitch(SwitchEntity):
+    """Representation of a cozylife_plug Switch."""
+
+    _attr_has_entity_name = True
 
     def __init__(self, config, entry_id):
         """Initialize the switch."""
         self._device = CozyLifeDevice(config[CONF_IP_ADDRESS])
-        self._name = config.get(CONF_NAME, f"BetterCozyLife Switch {config[CONF_IP_ADDRESS]}")
         self._ip = config[CONF_IP_ADDRESS]
         self._entry_id = entry_id
-        self._attr_has_entity_name = True
+
+        base_name = config.get(CONF_NAME, f"cozylife_plug Switch {self._ip}")
+        clean_name = base_name.strip()
+        slugified_name = re.sub(r"[^\w]+", "_", clean_name.lower()).strip("_")
+
+        self._attr_name = "Switch"
+        self._attr_suggested_object_id = f"{slugified_name}_switch"
+        self._attr_unique_id = f"cozylife_plug_switch_{self._ip}"
+
         self._is_on = False
         self._available = True
         self._last_update = 0
         self._error_count = 0
         self._max_errors = 3
-        
+
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._ip)},
+            name=base_name,
+            manufacturer="CozyLife",
+            model="Smart Switch",
+            sw_version="1.0",
+        )
+
         # Initialize state
         self._initialize_state()
 
@@ -84,23 +102,17 @@ class BetterCozyLifeSwitch(SwitchEntity):
     @property
     def unique_id(self):
         """Return a unique ID."""
-        return f"bettercozylife_switch_{self._ip}"
+        return self._attr_unique_id
 
     @property
     def device_info(self):
         """Return device information about this switch."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._ip)},
-            name=self._name,
-            manufacturer="CozyLife",
-            model="Smart Switch",
-            sw_version="1.0",
-        )
+        return self._attr_device_info
 
     @property
     def name(self):
         """Return the display name of this switch."""
-        return self._name
+        return self._attr_name
 
     @property
     def is_on(self):
@@ -118,7 +130,7 @@ class BetterCozyLifeSwitch(SwitchEntity):
             if self._device.send_command(True):
                 self._is_on = True
                 self._error_count = 0
-                _LOGGER.info(f"Successfully turned on switch: {self._name}")
+                _LOGGER.info(f"Successfully turned on switch: {self._attr_name}")
             else:
                 self._handle_error("Failed to turn on switch")
         except Exception as e:
@@ -130,7 +142,7 @@ class BetterCozyLifeSwitch(SwitchEntity):
             if self._device.send_command(False):
                 self._is_on = False
                 self._error_count = 0
-                _LOGGER.info(f"Successfully turned off switch: {self._name}")
+                _LOGGER.info(f"Successfully turned off switch: {self._attr_name}")
             else:
                 self._handle_error("Failed to turn off switch")
         except Exception as e:
