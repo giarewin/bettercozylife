@@ -19,6 +19,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from datetime import timedelta
 import asyncio
 import async_timeout
+import re
+
 from .const import DOMAIN, DEVICE_TYPE_SWITCH, CONF_DEVICE_TYPE
 from .cozylife_device import CozyLifeDevice
 import logging
@@ -32,17 +34,16 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the BetterCozyLife sensors."""
+    """Set up the cozylife_plug sensors."""
     config = config_entry.data
-    
+
     if config[CONF_DEVICE_TYPE] == DEVICE_TYPE_SWITCH:
         device = CozyLifeDevice(config[CONF_IP_ADDRESS])
-        currentSensor = BetterCozyLifeCurrentSensor(config, config_entry.entry_id, device)
-        powerSensor = BetterCozyLifePowerSensor(config, config_entry.entry_id, device)
-        voltageSensor = BetterCozyLifeVoltageSensor(config, config_entry.entry_id, device)
+        currentSensor = cozylife_plugCurrentSensor(config, config_entry.entry_id, device)
+        powerSensor = cozylife_plugPowerSensor(config, config_entry.entry_id, device)
+        voltageSensor = cozylife_plugVoltageSensor(config, config_entry.entry_id, device)
         async_add_entities([currentSensor, powerSensor, voltageSensor])
-        
-        # Set up regular state refresh
+
         async def refresh_state(now=None):
             """Refresh sensor state."""
             try:
@@ -51,19 +52,19 @@ async def async_setup_entry(
                     await hass.async_add_executor_job(powerSensor.update)
                     await hass.async_add_executor_job(voltageSensor.update)
             except asyncio.TimeoutError:
-                _LOGGER.warning("Timeout while updating power sensor")
+                _LOGGER.warning("Timeout while updating sensors")
             except Exception as e:
-                _LOGGER.error(f"Error updating power sensor: {e}")
+                _LOGGER.error(f"Error updating sensors: {e}")
 
-        # Initial state refresh
         await refresh_state()
-        
-        # Schedule regular updates
         async_track_time_interval(hass, refresh_state, SCAN_INTERVAL)
 
-class BetterCozyLifePowerSensor(SensorEntity):
-    """Representation of a BetterCozyLife Power Sensor."""
-    
+# =========================
+# Power Sensor
+# =========================
+class cozylife_plugPowerSensor(SensorEntity):
+    """Representation of a cozylife_plug Power Sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(self, config, entry_id, device):
@@ -71,23 +72,25 @@ class BetterCozyLifePowerSensor(SensorEntity):
         self._device = device
         self._ip = config[CONF_IP_ADDRESS]
         self._entry_id = entry_id
-        base_name = config.get(CONF_NAME, f"BetterCozyLife {self._ip}")
-        self._attr_name = f"{base_name} Power"
+
+        base_name = config.get(CONF_NAME, f"cozylife_plug {self._ip}")
+        clean_name = base_name.strip()
+        slugified_name = re.sub(r"[^\w]+", "_", clean_name.lower()).strip("_")
+
+        self._attr_name = "Power"
+        self._attr_suggested_object_id = f"{slugified_name}_power"
+        self._attr_unique_id = f"cozylife_plug_power_{self._ip}"
+
         self._state = None
         self._available = True
         self._error_count = 0
         self._max_errors = 3
         self._last_valid_state = None
-        
-        # Set up sensor attributes
+
         self._attr_device_class = SensorDeviceClass.POWER
         self._attr_native_unit_of_measurement = UnitOfPower.WATT
         self._attr_state_class = SensorStateClass.MEASUREMENT
-        
-        # Set unique ID
-        self._attr_unique_id = f"bettercozylife_power_{self._ip}"
-        
-        # Set device info
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._ip)},
             name=base_name,
@@ -95,12 +98,10 @@ class BetterCozyLifePowerSensor(SensorEntity):
             model="Smart Switch",
             sw_version="1.0",
         )
-        
-        # Initialize state
+
         self._initialize_state()
 
     def _initialize_state(self):
-        """Initialize the sensor state."""
         try:
             state = self._device.query_state()
             if state is not None:
@@ -117,16 +118,13 @@ class BetterCozyLifePowerSensor(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if entity is available."""
         return self._available
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""
         return self._state
 
     def _handle_error(self, error_message):
-        """Handle errors and update availability."""
         self._error_count += 1
         if self._error_count >= self._max_errors:
             self._available = False
@@ -135,7 +133,6 @@ class BetterCozyLifePowerSensor(SensorEntity):
             _LOGGER.warning(f"{error_message} - Attempt {self._error_count} of {self._max_errors}")
 
     def update(self) -> None:
-        """Fetch new state data for the sensor."""
         try:
             state = self._device.query_state()
             if state is not None:
@@ -149,33 +146,37 @@ class BetterCozyLifePowerSensor(SensorEntity):
         except Exception as e:
             self._handle_error(f"Error updating power sensor state: {e}")
 
-class BetterCozyLifeCurrentSensor(SensorEntity):
-    """Representation of a BetterCozyLife Current Sensor."""
-    
+# =========================
+# Current Sensor
+# =========================
+class cozylife_plugCurrentSensor(SensorEntity):
+    """Representation of a cozylife_plug Current Sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(self, config, entry_id, device):
-        """Initialize the current sensor."""
         self._device = device
         self._ip = config[CONF_IP_ADDRESS]
         self._entry_id = entry_id
-        base_name = config.get(CONF_NAME, f"BetterCozyLife {self._ip}")
-        self._attr_name = f"{base_name} Current"
+
+        base_name = config.get(CONF_NAME, f"cozylife_plug {self._ip}")
+        clean_name = base_name.strip()
+        slugified_name = re.sub(r"[^\w]+", "_", clean_name.lower()).strip("_")
+
+        self._attr_name = "Current"
+        self._attr_suggested_object_id = f"{slugified_name}_current"
+        self._attr_unique_id = f"cozylife_plug_current_{self._ip}"
+
         self._state = None
         self._available = True
         self._error_count = 0
         self._max_errors = 3
         self._last_valid_state = None
-        
-        # Set up sensor attributes
+
         self._attr_device_class = SensorDeviceClass.CURRENT
         self._attr_native_unit_of_measurement = UnitOfElectricCurrent.AMPERE
         self._attr_state_class = SensorStateClass.MEASUREMENT
-        
-        # Set unique ID
-        self._attr_unique_id = f"bettercozylife_current_{self._ip}"
-        
-        # Set device info
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._ip)},
             name=base_name,
@@ -183,12 +184,10 @@ class BetterCozyLifeCurrentSensor(SensorEntity):
             model="Smart Switch",
             sw_version="1.0",
         )
-        
-        # Initialize state
+
         self._initialize_state()
 
     def _initialize_state(self):
-        """Initialize the sensor state."""
         try:
             state = self._device.query_state()
             if state is not None:
@@ -197,7 +196,7 @@ class BetterCozyLifeCurrentSensor(SensorEntity):
                 self._last_valid_state = self._state
                 self._available = True
                 self._error_count = 0
-                _LOGGER.info(f"Successfully initialized current sensor: {self._state}W")
+                _LOGGER.info(f"Successfully initialized current sensor: {self._state}A")
             else:
                 self._handle_error("Failed to initialize current sensor state")
         except Exception as e:
@@ -205,16 +204,13 @@ class BetterCozyLifeCurrentSensor(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if entity is available."""
         return self._available
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""
         return self._state
 
     def _handle_error(self, error_message):
-        """Handle errors and update availability."""
         self._error_count += 1
         if self._error_count >= self._max_errors:
             self._available = False
@@ -223,7 +219,6 @@ class BetterCozyLifeCurrentSensor(SensorEntity):
             _LOGGER.warning(f"{error_message} - Attempt {self._error_count} of {self._max_errors}")
 
     def update(self) -> None:
-        """Fetch new state data for the sensor."""
         try:
             state = self._device.query_state()
             if state is not None:
@@ -237,33 +232,37 @@ class BetterCozyLifeCurrentSensor(SensorEntity):
         except Exception as e:
             self._handle_error(f"Error updating current sensor state: {e}")
 
-class BetterCozyLifeVoltageSensor(SensorEntity):
-    """Representation of a BetterCozyLife Voltage Sensor."""
-    
+# =========================
+# Voltage Sensor
+# =========================
+class cozylife_plugVoltageSensor(SensorEntity):
+    """Representation of a cozylife_plug Voltage Sensor."""
+
     _attr_has_entity_name = True
 
     def __init__(self, config, entry_id, device):
-        """Initialize the voltage sensor."""
         self._device = device
         self._ip = config[CONF_IP_ADDRESS]
         self._entry_id = entry_id
-        base_name = config.get(CONF_NAME, f"BetterCozyLife {self._ip}")
-        self._attr_name = f"{base_name} Voltage"
+
+        base_name = config.get(CONF_NAME, f"cozylife_plug {self._ip}")
+        clean_name = base_name.strip()
+        slugified_name = re.sub(r"[^\w]+", "_", clean_name.lower()).strip("_")
+
+        self._attr_name = "Voltage"
+        self._attr_suggested_object_id = f"{slugified_name}_voltage"
+        self._attr_unique_id = f"cozylife_plug_voltage_{self._ip}"
+
         self._state = None
         self._available = True
         self._error_count = 0
         self._max_errors = 3
         self._last_valid_state = None
-        
-        # Set up sensor attributes
+
         self._attr_device_class = SensorDeviceClass.VOLTAGE
         self._attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
         self._attr_state_class = SensorStateClass.MEASUREMENT
-        
-        # Set unique ID
-        self._attr_unique_id = f"bettercozylife_voltage_{self._ip}"
-        
-        # Set device info
+
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._ip)},
             name=base_name,
@@ -271,12 +270,10 @@ class BetterCozyLifeVoltageSensor(SensorEntity):
             model="Smart Switch",
             sw_version="1.0",
         )
-        
-        # Initialize state
+
         self._initialize_state()
 
     def _initialize_state(self):
-        """Initialize the sensor state."""
         try:
             state = self._device.query_state()
             if state is not None:
@@ -285,7 +282,7 @@ class BetterCozyLifeVoltageSensor(SensorEntity):
                 self._last_valid_state = self._state
                 self._available = True
                 self._error_count = 0
-                _LOGGER.info(f"Successfully initialized voltage sensor: {self._state}W")
+                _LOGGER.info(f"Successfully initialized voltage sensor: {self._state}V")
             else:
                 self._handle_error("Failed to initialize voltage sensor state")
         except Exception as e:
@@ -293,16 +290,13 @@ class BetterCozyLifeVoltageSensor(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if entity is available."""
         return self._available
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""
         return self._state
 
     def _handle_error(self, error_message):
-        """Handle errors and update availability."""
         self._error_count += 1
         if self._error_count >= self._max_errors:
             self._available = False
@@ -311,7 +305,6 @@ class BetterCozyLifeVoltageSensor(SensorEntity):
             _LOGGER.warning(f"{error_message} - Attempt {self._error_count} of {self._max_errors}")
 
     def update(self) -> None:
-        """Fetch new state data for the sensor."""
         try:
             state = self._device.query_state()
             if state is not None:
